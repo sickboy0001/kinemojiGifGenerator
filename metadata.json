@@ -1,0 +1,5 @@
+{
+  "name": "Kinemoji GIF Generator",
+  "description": "Generate custom animated GIFs with text using Puppeteer and GIF Encoder.",
+  "requestFramePermissions": []
+}
