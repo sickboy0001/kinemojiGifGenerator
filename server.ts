@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import fernet from "fernet";
+import CryptoJS from "crypto-js";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,15 +14,24 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   // Dynamic CORS setup
+  const isDev = process.env.NODE_ENV === "development";
   const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
+  // Add current Cloud Run URL to allowed origins if it's not there
+  const cloudRunUrl = 'https://kinemoji-gif-generator-271122168021.us-west1.run.app';
+  if (!allowedOrigins.includes(cloudRunUrl)) {
+    allowedOrigins.push(cloudRunUrl);
+  }
+
   app.use(cors({
     origin: (origin, callback) => {
+      // Allow all in development
+      if (isDev) return callback(null, true);
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -32,64 +41,79 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Fernet Security Middleware
-  const verifyFernetToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Security Middleware using CryptoJS
+  const verifySecurityToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const key = process.env.FERNET_KEY;
     if (!key) {
       console.warn("FERNET_KEY not set, skipping verification (Development only)");
       return next();
     }
 
-    const token = req.headers['x-fernet-token'] as string;
+    const token = req.headers['x-security-token'] as string;
     if (!token) {
       return res.status(401).json({ error: "Security token missing" });
     }
 
     try {
-      const secret = new fernet.Secret(key);
-      const fernetToken = new fernet.Token({
-        secret: secret,
-        token: token,
-        ttl: 60 // 1 minute TTL for security
-      });
-      const message = fernetToken.decode();
-      if (message) {
-        next();
-      } else {
-        res.status(401).json({ error: "Invalid security token" });
+      const bytes = CryptoJS.AES.decrypt(token, key);
+      const decryptedData = bytes.toString(CryptoJS.enc.Utf8);
+      
+      if (!decryptedData.startsWith("kinemoji-request:")) {
+        return res.status(401).json({ error: "Invalid security token format" });
       }
+
+      const timestamp = parseInt(decryptedData.split(":")[1]);
+      const now = Date.now();
+      
+      // Allow 5 minutes clock skew/validity
+      if (isNaN(timestamp) || Math.abs(now - timestamp) > 5 * 60 * 1000) {
+        return res.status(401).json({ error: "Security token expired or invalid timestamp" });
+      }
+
+      next();
     } catch (e) {
+      console.error("Security verification error:", e);
       res.status(401).json({ error: "Security verification failed" });
     }
   };
 
-  // Initialize Database
-  try {
-    const sql = `
-      CREATE TABLE IF NOT EXISTS kinemojis (
-        id TEXT PRIMARY KEY,
-        short_id TEXT NOT NULL UNIQUE,
-        text TEXT NOT NULL,
-        parameters TEXT NOT NULL,
-        image_url TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        progress INTEGER NOT NULL DEFAULT 0,
-        error TEXT,
-        creator_id TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    `;
-    // Use the raw client to execute SQL
-    // @ts-ignore
-    await db.$client.execute(sql);
-    console.log("Database initialized successfully.");
-  } catch (e) {
-    console.error("Database initialization failed:", e);
-  }
+  // Initialize Database (Non-blocking)
+  const initDb = async () => {
+    try {
+      console.log("Starting database initialization...");
+      const sql = `
+        CREATE TABLE IF NOT EXISTS kinemojis (
+          id TEXT PRIMARY KEY,
+          short_id TEXT NOT NULL UNIQUE,
+          text TEXT NOT NULL,
+          parameters TEXT NOT NULL,
+          image_url TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          progress INTEGER NOT NULL DEFAULT 0,
+          error TEXT,
+          creator_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `;
+      // @ts-ignore
+      if (db.$client && typeof db.$client.execute === 'function') {
+        // @ts-ignore
+        await db.$client.execute(sql);
+        console.log("Database initialized successfully.");
+      } else {
+        console.warn("Database client not available for raw execution, skipping table creation.");
+      }
+    } catch (e) {
+      console.error("Database initialization failed (non-fatal):", e);
+    }
+  };
+
+  // Start DB init but don't await it to prevent blocking server start
+  initDb();
 
   // API Routes
-  app.post("/api/kinemoji/gif", verifyFernetToken, gifHandler);
+  app.post("/api/kinemoji/gif", verifySecurityToken, gifHandler);
   
   app.get("/api/kinemoji/status/:id", async (req, res) => {
     const { id } = req.params;
@@ -116,22 +140,26 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (isDev) {
+    console.log("Running in DEVELOPMENT mode");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
+    console.log("Running in PRODUCTION mode");
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: 'index.html' }));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`>>> Server is listening on port ${PORT}`);
+    console.log(`>>> NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`>>> FERNET_KEY configured: ${!!process.env.FERNET_KEY}`);
   });
 }
 

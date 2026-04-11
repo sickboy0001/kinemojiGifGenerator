@@ -68,22 +68,32 @@ export const gifHandler = async (req: Request, res: Response) => {
       });
 
       const page = await browser.newPage();
-      page.on('console', msg => console.log('PAGE LOG:', msg.text()));
-      page.on('error', err => console.error('PAGE ERROR:', err));
+      page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
+      page.on('pageerror', err => console.error('BROWSER PAGE ERROR:', err.message));
+      page.on('requestfailed', request => console.log('BROWSER REQ FAILED:', request.url(), request.failure()?.errorText));
       
       await page.setViewport({ width: Number(width), height: Number(height) });
 
       // レンダリング
-      // Use FRONTEND_URL if provided (for Netlify), otherwise fallback to local
-      const renderBaseUrl = process.env.FRONTEND_URL || "http://127.0.0.1:3000";
+      // Always use localhost for internal rendering to ensure we hit the current server
+      const port = process.env.PORT || "3000";
+      const renderBaseUrl = `http://localhost:${port}`;
       const renderUrl = `${renderBaseUrl}/kinemoji/render?text=${encodeURIComponent(text)}&type=${type}&action=${action}&width=${width}&height=${height}&foreColor=${encodeURIComponent(foreColor)}&backColor=${encodeURIComponent(backColor)}`;
       
       console.log(`Navigating to: ${renderUrl}`);
-      await page.goto(renderUrl, { waitUntil: "networkidle0", timeout: 30000 });
+      const navResponse = await page.goto(renderUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      console.log(`Navigation finished. HTTP Status: ${navResponse?.status() || 'unknown'}`);
+      console.log(`Current Page URL: ${page.url()}`);
 
       // Wait for React to be ready
-      console.log("Waiting for Kinemoji to be ready...");
-      await page.waitForFunction(() => (window as any).isKinemojiReady === true, { timeout: 10000 });
+      console.log("Waiting for Kinemoji to be ready (isKinemojiReady)...");
+      try {
+        await page.waitForFunction(() => (window as any).isKinemojiReady === true, { timeout: 20000 });
+        console.log("Kinemoji is ready!");
+      } catch (timeoutErr) {
+        console.error("Timeout waiting for isKinemojiReady. Page content:", await page.content());
+        throw timeoutErr;
+      }
 
       // GIF 生成
       console.log(`Starting GIF generation...`);

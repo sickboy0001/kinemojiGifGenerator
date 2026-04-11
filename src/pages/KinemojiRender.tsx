@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export default function KinemojiRender() {
+  console.log("KinemojiRender: Component rendering start");
   const [searchParams] = useSearchParams();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -14,12 +15,21 @@ export default function KinemojiRender() {
   const backColor = searchParams.get('backColor') || '#000000';
 
   useEffect(() => {
+    console.log("KinemojiRender: useEffect triggered", { text, action, width, height });
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      console.warn("KinemojiRender: Canvas ref not found");
+      (window as any).isKinemojiReady = true;
+      return;
+    }
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.error("KinemojiRender: Failed to get canvas context");
+      return;
+    }
 
+    console.log("KinemojiRender: Canvas ready, setting global flags");
     let frame = 0;
     const maxFrames = 30;
 
@@ -58,8 +68,10 @@ export default function KinemojiRender() {
       return true;
     };
     (window as any).isKinemojiReady = true;
+    console.log("KinemojiRender: isKinemojiReady set to true");
 
     return () => {
+      console.log("KinemojiRender: Cleaning up global flags");
       delete (window as any).advanceFrame;
       delete (window as any).isKinemojiReady;
     };

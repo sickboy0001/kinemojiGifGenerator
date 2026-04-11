@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, Download, Play, Settings, Image as ImageIcon, AlertCircle, CheckCircle2 } from 'lucide-react';
 import KinemojiRender from './pages/KinemojiRender';
-import fernet from 'fernet';
+import CryptoJS from 'crypto-js';
 
 function Generator() {
   const [text, setText] = useState('LUPIN THE THIRD');
@@ -15,10 +15,25 @@ function Generator() {
   const currentIdRef = useRef<string | null>(null);
 
   const checkStatus = async (id: string) => {
-    const API_BASE_URL = (process.env as any).VITE_API_URL || '';
+    let API_BASE_URL = import.meta.env.VITE_API_URL || '';
+    const isDev = import.meta.env.DEV;
+    
+    // In development (AI Studio preview), always use same origin
+    if (isDev || API_BASE_URL === '/' || !API_BASE_URL.startsWith('http')) {
+      API_BASE_URL = '';
+    }
+    // Remove trailing slash if present to avoid double slashes
+    if (API_BASE_URL.endsWith('/')) {
+      API_BASE_URL = API_BASE_URL.slice(0, -1);
+    }
     try {
-      const statusRes = await fetch(`${API_BASE_URL}/api/kinemoji/status/${id}`);
-      if (!statusRes.ok) return null;
+      const url = `${API_BASE_URL}/api/kinemoji/status/${id}`;
+      console.log(`Fetching status from: ${url}`);
+      const statusRes = await fetch(url);
+      if (!statusRes.ok) {
+        console.error(`Status check failed with HTTP ${statusRes.status}: ${statusRes.statusText}`);
+        return null;
+      }
       const data = await statusRes.json();
       
       const currentProgress = data.progress ?? 0;
@@ -54,7 +69,16 @@ function Generator() {
   };
 
   const generateGif = async () => {
-    const API_BASE_URL = (process.env as any).VITE_API_URL || '';
+    let API_BASE_URL = import.meta.env.VITE_API_URL || '';
+    const isDev = import.meta.env.DEV;
+    
+    if (isDev || API_BASE_URL === '/' || !API_BASE_URL.startsWith('http')) {
+      API_BASE_URL = '';
+    }
+    // Remove trailing slash if present to avoid double slashes
+    if (API_BASE_URL.endsWith('/')) {
+      API_BASE_URL = API_BASE_URL.slice(0, -1);
+    }
     const FERNET_KEY = (process.env as any).FERNET_KEY;
     
     setStatus('processing');
@@ -62,18 +86,15 @@ function Generator() {
     setError('');
     setStatusMessage('Starting generation...');
 
-    // Generate Fernet Token for security
+    // Generate Security Token using CryptoJS (Browser compatible)
     let securityHeader = {};
     if (FERNET_KEY) {
       try {
-        const secret = new fernet.Secret(FERNET_KEY);
-        const token = new fernet.Token({
-          secret: secret,
-          time: Date.now(),
-          iv: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-        });
-        const encodedToken = token.encode("kinemoji-request");
-        securityHeader = { 'x-fernet-token': encodedToken };
+        // Use a simple AES encryption with the FERNET_KEY
+        // We include a timestamp to prevent replay attacks
+        const timestamp = Date.now().toString();
+        const encrypted = CryptoJS.AES.encrypt("kinemoji-request:" + timestamp, FERNET_KEY).toString();
+        securityHeader = { 'x-security-token': encrypted };
       } catch (e) {
         console.error("Failed to generate security token:", e);
       }
@@ -94,7 +115,9 @@ function Generator() {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/kinemoji/gif`, {
+      const url = `${API_BASE_URL}/api/kinemoji/gif`;
+      console.log(`Starting generation at: ${url}`);
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -103,7 +126,11 @@ function Generator() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) throw new Error('Failed to start generation');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Generation start failed with HTTP ${response.status}: ${errorText}`);
+        throw new Error(`Failed to start generation: ${response.status}`);
+      }
 
       // Polling for status
       const pollInterval = setInterval(async () => {
