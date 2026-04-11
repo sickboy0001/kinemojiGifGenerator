@@ -74,9 +74,9 @@ export const gifHandler = async (req: Request, res: Response) => {
       await page.setViewport({ width: Number(width), height: Number(height) });
 
       // レンダリング
-      // Use 127.0.0.1 to be safe inside container
-      const baseUrl = "http://127.0.0.1:3000";
-      const renderUrl = `${baseUrl}/kinemoji/render?text=${encodeURIComponent(text)}&type=${type}&action=${action}&width=${width}&height=${height}&foreColor=${encodeURIComponent(foreColor)}&backColor=${encodeURIComponent(backColor)}`;
+      // Use FRONTEND_URL if provided (for Netlify), otherwise fallback to local
+      const renderBaseUrl = process.env.FRONTEND_URL || "http://127.0.0.1:3000";
+      const renderUrl = `${renderBaseUrl}/kinemoji/render?text=${encodeURIComponent(text)}&type=${type}&action=${action}&width=${width}&height=${height}&foreColor=${encodeURIComponent(foreColor)}&backColor=${encodeURIComponent(backColor)}`;
       
       console.log(`Navigating to: ${renderUrl}`);
       await page.goto(renderUrl, { waitUntil: "networkidle0", timeout: 30000 });

@@ -1,4 +1,6 @@
 import express from "express";
+import cors from "cors";
+import fernet from "fernet";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,7 +16,52 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Dynamic CORS setup
+  const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  }));
+
   app.use(express.json());
+
+  // Fernet Security Middleware
+  const verifyFernetToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const key = process.env.FERNET_KEY;
+    if (!key) {
+      console.warn("FERNET_KEY not set, skipping verification (Development only)");
+      return next();
+    }
+
+    const token = req.headers['x-fernet-token'] as string;
+    if (!token) {
+      return res.status(401).json({ error: "Security token missing" });
+    }
+
+    try {
+      const secret = new fernet.Secret(key);
+      const fernetToken = new fernet.Token({
+        secret: secret,
+        token: token,
+        ttl: 60 // 1 minute TTL for security
+      });
+      const message = fernetToken.decode();
+      if (message) {
+        next();
+      } else {
+        res.status(401).json({ error: "Invalid security token" });
+      }
+    } catch (e) {
+      res.status(401).json({ error: "Security verification failed" });
+    }
+  };
 
   // Initialize Database
   try {
@@ -42,7 +89,7 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/kinemoji/gif", gifHandler);
+  app.post("/api/kinemoji/gif", verifyFernetToken, gifHandler);
   
   app.get("/api/kinemoji/status/:id", async (req, res) => {
     const { id } = req.params;

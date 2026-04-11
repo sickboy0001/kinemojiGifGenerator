@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, Download, Play, Settings, Image as ImageIcon, AlertCircle, CheckCircle2 } from 'lucide-react';
 import KinemojiRender from './pages/KinemojiRender';
+import fernet from 'fernet';
 
 function Generator() {
   const [text, setText] = useState('LUPIN THE THIRD');
@@ -14,8 +15,9 @@ function Generator() {
   const currentIdRef = useRef<string | null>(null);
 
   const checkStatus = async (id: string) => {
+    const API_BASE_URL = (process.env as any).VITE_API_URL || '';
     try {
-      const statusRes = await fetch(`/api/kinemoji/status/${id}`);
+      const statusRes = await fetch(`${API_BASE_URL}/api/kinemoji/status/${id}`);
       if (!statusRes.ok) return null;
       const data = await statusRes.json();
       
@@ -52,10 +54,30 @@ function Generator() {
   };
 
   const generateGif = async () => {
+    const API_BASE_URL = (process.env as any).VITE_API_URL || '';
+    const FERNET_KEY = (process.env as any).FERNET_KEY;
+    
     setStatus('processing');
     setProgress(10);
     setError('');
     setStatusMessage('Starting generation...');
+
+    // Generate Fernet Token for security
+    let securityHeader = {};
+    if (FERNET_KEY) {
+      try {
+        const secret = new fernet.Secret(FERNET_KEY);
+        const token = new fernet.Token({
+          secret: secret,
+          time: Date.now(),
+          iv: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        });
+        const encodedToken = token.encode("kinemoji-request");
+        securityHeader = { 'x-fernet-token': encodedToken };
+      } catch (e) {
+        console.error("Failed to generate security token:", e);
+      }
+    }
     
     const id = crypto.randomUUID();
     currentIdRef.current = id;
@@ -72,9 +94,12 @@ function Generator() {
     };
 
     try {
-      const response = await fetch('/api/kinemoji/gif', {
+      const response = await fetch(`${API_BASE_URL}/api/kinemoji/gif`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...securityHeader
+        },
         body: JSON.stringify(payload),
       });
 
