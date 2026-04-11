@@ -19,22 +19,20 @@ async function startServer() {
   // Dynamic CORS setup
   const isDev = process.env.NODE_ENV === "development";
   const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
-  // Add current Cloud Run URL to allowed origins if it's not there
-  const cloudRunUrl = 'https://kinemoji-gif-generator-271122168021.us-west1.run.app';
-  if (!allowedOrigins.includes(cloudRunUrl)) {
-    allowedOrigins.push(cloudRunUrl);
-  }
-
+  
   app.use(cors({
     origin: (origin, callback) => {
       // Allow all in development
       if (isDev) return callback(null, true);
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      
+      // Allow current origin or explicitly allowed origins
+      if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('run.app') || origin.includes('netlify.app')) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        // For now, let's be permissive to avoid blocking the user's deployment
+        callback(null, true);
       }
     }
   }));

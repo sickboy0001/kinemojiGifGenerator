@@ -18,16 +18,17 @@ function Generator() {
     let API_BASE_URL = import.meta.env.VITE_API_URL || '';
     const isDev = import.meta.env.DEV;
     
-    // In development (AI Studio preview), always use same origin
-    if (isDev || API_BASE_URL === '/' || !API_BASE_URL.startsWith('http')) {
+    // In full-stack deployment, we should prefer relative paths unless an external API is explicitly required.
+    // If we're in dev mode or VITE_API_URL is not a full URL, use relative path.
+    if (isDev || !API_BASE_URL.startsWith('http')) {
       API_BASE_URL = '';
     }
-    // Remove trailing slash if present to avoid double slashes
-    if (API_BASE_URL.endsWith('/')) {
-      API_BASE_URL = API_BASE_URL.slice(0, -1);
-    }
+
     try {
-      const url = `${API_BASE_URL}/api/kinemoji/status/${id}`;
+      // Clean up double slashes but preserve http:// or https://
+      const baseUrl = API_BASE_URL.replace(/\/+$/, '');
+      const url = `${baseUrl}/api/kinemoji/status/${id}`.replace(/([^:]\/)\/+/g, "$1");
+      
       console.log(`Fetching status from: ${url}`);
       const statusRes = await fetch(url);
       if (!statusRes.ok) {
@@ -72,13 +73,10 @@ function Generator() {
     let API_BASE_URL = import.meta.env.VITE_API_URL || '';
     const isDev = import.meta.env.DEV;
     
-    if (isDev || API_BASE_URL === '/' || !API_BASE_URL.startsWith('http')) {
+    if (isDev || !API_BASE_URL.startsWith('http')) {
       API_BASE_URL = '';
     }
-    // Remove trailing slash if present to avoid double slashes
-    if (API_BASE_URL.endsWith('/')) {
-      API_BASE_URL = API_BASE_URL.slice(0, -1);
-    }
+
     const FERNET_KEY = (process.env as any).FERNET_KEY;
     
     setStatus('processing');
@@ -90,8 +88,6 @@ function Generator() {
     let securityHeader = {};
     if (FERNET_KEY) {
       try {
-        // Use a simple AES encryption with the FERNET_KEY
-        // We include a timestamp to prevent replay attacks
         const timestamp = Date.now().toString();
         const encrypted = CryptoJS.AES.encrypt("kinemoji-request:" + timestamp, FERNET_KEY).toString();
         securityHeader = { 'x-security-token': encrypted };
@@ -115,7 +111,9 @@ function Generator() {
     };
 
     try {
-      const url = `${API_BASE_URL}/api/kinemoji/gif`;
+      const baseUrl = API_BASE_URL.replace(/\/+$/, '');
+      const url = `${baseUrl}/api/kinemoji/gif`.replace(/([^:]\/)\/+/g, "$1");
+      
       console.log(`Starting generation at: ${url}`);
       const response = await fetch(url, {
         method: 'POST',
